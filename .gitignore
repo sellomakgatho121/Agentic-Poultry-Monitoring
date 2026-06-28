@@ -1,0 +1,45 @@
+# Node.js
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.eslintcache
+.stylelintcache
+
+# Vite build outputs
+client/node_modules/
+client/dist/
+client/dist-ssr/
+*.local
+
+# System/IDE configurations
+.gemini/
+.agents/
+.cache/
+.config/
+.local/
+.npm/
+.copilot/
+.gnupg/
+.bash_history
+.bashrc
+.profile
+.gitconfig
+
+# Windows/Mac temp files
+Thumbs.db
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+ENV/
+.env
+.venv
+pip-log.txt
+pip-delete-this-directory.txt
