@@ -1,0 +1,35 @@
+# ============================================================================
+# Boonducks Farm PLF Engine — Workers Dockerfile
+# Python AI workers (acoustic, vision, telemetry)
+# ============================================================================
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # For psycopg2
+    libpq-dev gcc \
+    # For serial access
+    libusb-1.0-0 \
+    # For vision (OpenCV/ffmpeg deps)
+    ffmpeg libsm6 libxext6 libxrender-dev libgomp1 \
+    # Virtual display for vision analyzer
+    xvfb \
+    # Cleanup
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy and install Python dependencies
+COPY requirements-workers.txt .
+RUN pip install --no-cache-dir -r requirements-workers.txt
+
+# Copy worker scripts (mounted in docker-compose, but have defaults)
+COPY acoustic_analyzer.py vision_analyzer.py telemetry_worker.py ./
+
+# Default to sim mode if no DB is reachable
+ENV MODE=sim
+ENV DISPLAY=:99
+
+# The docker-compose.yml overrides CMD to run all workers
+CMD ["python3", "/app/telemetry_worker.py"]

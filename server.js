@@ -2,49 +2,138 @@
  * Boonducks Farm PLF Engine - API Server
  * V.E.R.S. Protocol Compatible
  * 
- * Express.js API with PostgreSQL connection pooling for TimescaleDB.
- * Aggregates environmental telemetry, Edge-AI stress inferences, egg yield, and financial metrics.
+ * Express.js API with dual-mode data layer:
+ *   MODE=live  → PostgreSQL/TimescaleDB connection
+ *   MODE=sim   → In-memory synthetic data generator (default, no DB required)
  */
 
 const express = require('express');
 const cors = require('cors');
-const { Pool } = require('pg');
 require('dotenv').config();
 
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Enable CORS and JSON parsing
 app.use(cors());
 app.use(express.json());
 
-// Database Connection Pool
-const pool = new Pool({
-  connectionString: process.env.DATABASE_URL || 'postgresql://postgres:postgres@localhost:5432/boonducks_plf',
-  max: 20, // High concurrency connection pool size
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 2000,
-});
+// ============================================================================
+// MODE SELECTION
+// ============================================================================
+const MODE = (process.env.MODE || 'sim').toLowerCase();
 
-// Test DB Connection on startup
-pool.query('SELECT NOW()', (err, res) => {
-  if (err) {
-    console.error('❌ Database connection error:', err.stack);
-  } else {
-    console.log('⚡ Connected to TimescaleDB at:', res.rows[0].now);
+// ============================================================================
+// SIMULATION DATA ENGINE  (MODE=sim)
+// ============================================================================
+
+const COOPS = [
+  { id: 1, name: 'Cage Coop A',     type: 'cage',       capacity: 312 },
+  { id: 2, name: 'Cage Coop B',     type: 'cage',       capacity: 310 },
+  { id: 3, name: 'Litter Coop 1',   type: 'deep_litter', capacity: 104 },
+  { id: 4, name: 'Litter Coop 2',   type: 'deep_litter', capacity: 104 },
+  { id: 5, name: 'Litter Coop 3',   type: 'deep_litter', capacity: 104 },
+  { id: 6, name: 'Litter Coop 4',   type: 'deep_litter', capacity: 104 },
+  { id: 7, name: 'Litter Coop 5',   type: 'deep_litter', capacity: 104 },
+  { id: 8, name: 'Litter Coop 6',   type: 'deep_litter', capacity: 104 },
+];
+
+// Fixed seed for deterministic-but-varying output
+let tick = 0;
+
+function randomBetween(min, max) {
+  const seeded = Math.sin((tick + 1) * 12.9898 + COOPS.length * 4.1415) * 43758.5453;
+  const r = seeded - Math.floor(seeded);
+  return min + r * (max - min);
+}
+
+function advanceTick() {
+  tick++;
+}
+
+function getCurrentStats(coop) {
+  const isCage = coop.type === 'cage';
+  const baseTemp = isCage ? 24.5 : 22.0;
+  const baseHum  = isCage ? 55 : 60;
+  const wave = Math.sin(tick / 6) * 1.5;
+  return {
+    temperature: parseFloat((baseTemp + wave + randomBetween(-0.3, 0.3)).toFixed(1)),
+    humidity:    parseFloat((baseHum - wave * 1.5 + randomBetween(-1, 1)).toFixed(1)),
+    nh3_level:   isCage ? 0.0 : parseFloat((12.0 + randomBetween(-1, 1) + Math.max(0, wave * 0.5)).toFixed(1)),
+    acoustic_stress:   parseFloat((0.20 + randomBetween(-0.08, 0.10)).toFixed(2)),
+    peak_frequency:    parseFloat((900 + randomBetween(-100, 100)).toFixed(1)),
+    huddling_index:    parseFloat((0.25 + randomBetween(-0.08, 0.10)).toFixed(2)),
+    bird_count:        isCage ? 312 : 104,
+    active_birds:      isCage ? Math.floor(260 + randomBetween(-15, 10)) : Math.floor(88 + randomBetween(-8, 6)),
+  };
+}
+
+function buildTelemetryHistory(rangeHours = 24, coopId = null) {
+  const rows = [];
+  const coops = coopId ? COOPS.filter(c => c.id === Number(coopId)) : COOPS;
+  for (let h = rangeHours; h >= 0; h--) {
+    const fakeTick = tick - h;
+    const time = new Date(Date.now() - h * 3600000).toISOString();
+    coops.forEach(coop => {
+      const isLitter = coop.type === 'deep_litter';
+      const wave = Math.sin((tick - h) / 6) * 1.5;
+      const baseTemp = isLitter ? 22.0 : 24.5;
+      const baseHum  = isLitter ? 60 : 55;
+      rows.push({
+        time,
+        coop_id: coop.id,
+        avg_temp:     parseFloat((baseTemp + wave + Math.sin(h * 0.5) * 0.5).toFixed(1)),
+        avg_humidity: parseFloat((baseHum - wave * 1.5 + Math.cos(h * 0.3) * 1.5).toFixed(1)),
+        avg_nh3:      isLitter ? parseFloat((12.0 + Math.sin(h * 0.7) * 2).toFixed(1)) : 0.0,
+      });
+    });
   }
+  return rows;
+}
+
+// ============================================================================
+// TIMESCALEDB CONNECTION (MODE=live)
+// ============================================================================
+
+let pool = null;
+if (MODE === 'live') {
+  const { Pool } = require('pg');
+  pool = new Pool({
+    connectionString: process.env.DATABASE_URL || 'postgresql://postgres:***@localhost:5432/boonducks_plf',
+    max: 20,
+    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 2000,
+  });
+  pool.query('SELECT NOW()', (err, res) => {
+    if (err) console.error('\u274c Database connection error:', err.stack);
+    else console.log('\u26a1 Connected to TimescaleDB at:', res.rows[0].now);
+  });
+}
+
+console.log(`\ud83d\ude80 Boonducks PLF API — MODE=${MODE} on port ${PORT}`);
+
+// ============================================================================
+// MIDDLEWARE: Advance simulation tick on each request
+// ============================================================================
+app.use((req, res, next) => {
+  if (MODE === 'sim') {
+    advanceTick();
+    if (tick % 20 === 0) {
+      // Refresh old tick to keep history growing
+    }
+  }
+  next();
 });
 
 // ============================================================================
 // API ENDPOINTS
 // ============================================================================
 
-/**
- * GET /api/coops
- * Retrieve all coops registry and metadata
- */
+// GET /api/coops
 app.get('/api/coops', async (req, res) => {
   try {
+    if (MODE === 'sim') {
+      return res.json(COOPS);
+    }
     const result = await pool.query('SELECT id, name, type, capacity FROM coops ORDER BY id;');
     res.json(result.rows);
   } catch (err) {
@@ -53,19 +142,25 @@ app.get('/api/coops', async (req, res) => {
   }
 });
 
-/**
- * GET /api/telemetry/live
- * Latest telemetry (Temp, Humidity, NH3) for each coop
- */
+// GET /api/telemetry/live
 app.get('/api/telemetry/live', async (req, res) => {
   try {
-    const query = `
-      SELECT DISTINCT ON (coop_id) 
-        coop_id, time, temperature, humidity, nh3_level 
-      FROM telemetry 
-      ORDER BY coop_id, time DESC;
-    `;
-    const result = await pool.query(query);
+    if (MODE === 'sim') {
+      const data = COOPS.map(c => {
+        const s = getCurrentStats(c);
+        return {
+          coop_id: c.id,
+          time: new Date().toISOString(),
+          temperature: s.temperature,
+          humidity: s.humidity,
+          nh3_level: s.nh3_level,
+        };
+      });
+      return res.json(data);
+    }
+    const result = await pool.query(
+      'SELECT DISTINCT ON (coop_id) coop_id, time, temperature, humidity, nh3_level FROM telemetry ORDER BY coop_id, time DESC;'
+    );
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -73,47 +168,24 @@ app.get('/api/telemetry/live', async (req, res) => {
   }
 });
 
-/**
- * GET /api/telemetry/history
- * Historical telemetry using TimescaleDB Continuous Aggregates
- * Query params: coop_id (optional), range (24h, 7d, 30d)
- */
+// GET /api/telemetry/history
 app.get('/api/telemetry/history', async (req, res) => {
   const { coop_id, range = '24h' } = req.query;
-  let interval = '24 hours';
-  let view = 'telemetry_hourly';
-  let timeColumn = 'bucket';
-
-  if (range === '7d') {
-    interval = '7 days';
-    view = 'telemetry_hourly';
-  } else if (range === '30d') {
-    interval = '30 days';
-    view = 'telemetry_daily';
-  }
-
   try {
-    let query = '';
-    const params = [];
-
-    if (coop_id) {
-      query = `
-        SELECT ${timeColumn} AS time, coop_id, avg_temp, avg_humidity, avg_nh3
-        FROM ${view}
-        WHERE ${timeColumn} >= NOW() - INTERVAL '${interval}'
-          AND coop_id = $1
-        ORDER BY ${timeColumn} ASC;
-      `;
-      params.push(coop_id);
-    } else {
-      query = `
-        SELECT ${timeColumn} AS time, coop_id, avg_temp, avg_humidity, avg_nh3
-        FROM ${view}
-        WHERE ${timeColumn} >= NOW() - INTERVAL '${interval}'
-        ORDER BY ${timeColumn} ASC;
-      `;
+    if (MODE === 'sim') {
+      const hours = range === '7d' ? 168 : range === '30d' ? 720 : 24;
+      const rows = buildTelemetryHistory(hours, coop_id);
+      return res.json(rows);
     }
-
+    let interval = '24 hours';
+    let view = 'telemetry_hourly';
+    let timeColumn = 'bucket';
+    if (range === '7d') { interval = '7 days'; view = 'telemetry_hourly'; }
+    else if (range === '30d') { interval = '30 days'; view = 'telemetry_daily'; }
+    const query = coop_id
+      ? `SELECT ${timeColumn} AS time, coop_id, avg_temp, avg_humidity, avg_nh3 FROM ${view} WHERE ${timeColumn} >= NOW() - INTERVAL '${interval}' AND coop_id = $1 ORDER BY ${timeColumn} ASC;`
+      : `SELECT ${timeColumn} AS time, coop_id, avg_temp, avg_humidity, avg_nh3 FROM ${view} WHERE ${timeColumn} >= NOW() - INTERVAL '${interval}' ORDER BY ${timeColumn} ASC;`;
+    const params = coop_id ? [coop_id] : [];
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -122,26 +194,34 @@ app.get('/api/telemetry/history', async (req, res) => {
   }
 });
 
-/**
- * GET /api/stress/live
- * Latest Edge-AI inferences (Acoustic & Vision) for all coops
- */
+// GET /api/stress/live
 app.get('/api/stress/live', async (req, res) => {
   try {
-    const query = `
-      SELECT 
-        c.id AS coop_id,
-        c.name AS coop_name,
-        c.type AS coop_type,
+    if (MODE === 'sim') {
+      const data = COOPS.map(c => {
+        const s = getCurrentStats(c);
+        return {
+          coop_id: c.id,
+          coop_name: c.name,
+          coop_type: c.type,
+          acoustic_stress: s.acoustic_stress,
+          peak_frequency: s.peak_frequency,
+          huddling_index: s.huddling_index,
+          bird_count: s.bird_count,
+          active_birds: s.active_birds,
+        };
+      });
+      return res.json(data);
+    }
+    const result = await pool.query(`
+      SELECT c.id AS coop_id, c.name AS coop_name, c.type AS coop_type,
         COALESCE((SELECT stress_level FROM acoustic_stress WHERE coop_id = c.id ORDER BY time DESC LIMIT 1), 0.00) AS acoustic_stress,
         COALESCE((SELECT peak_frequency FROM acoustic_stress WHERE coop_id = c.id ORDER BY time DESC LIMIT 1), 0.00) AS peak_frequency,
         COALESCE((SELECT huddling_index FROM vision_inference WHERE coop_id = c.id ORDER BY time DESC LIMIT 1), 0.00) AS huddling_index,
         COALESCE((SELECT bird_count FROM vision_inference WHERE coop_id = c.id ORDER BY time DESC LIMIT 1), 0) AS bird_count,
         COALESCE((SELECT active_birds FROM vision_inference WHERE coop_id = c.id ORDER BY time DESC LIMIT 1), 0) AS active_birds
-      FROM coops c
-      ORDER BY c.id;
-    `;
-    const result = await pool.query(query);
+      FROM coops c ORDER BY c.id;
+    `);
     res.json(result.rows);
   } catch (err) {
     console.error(err);
@@ -149,58 +229,37 @@ app.get('/api/stress/live', async (req, res) => {
   }
 });
 
-/**
- * GET /api/stress/history
- * Historical stress trends using Continuous Aggregates
- */
+// GET /api/stress/history
 app.get('/api/stress/history', async (req, res) => {
   const { coop_id, range = '24h' } = req.query;
-  let interval = '24 hours';
-  let timeColumn = 'bucket';
-
-  if (range === '7d') {
-    interval = '7 days';
-  } else if (range === '30d') {
-    interval = '30 days';
-  }
-
   try {
-    let query = '';
-    const params = [];
-
-    // Query both acoustic and vision aggregated histories and join them
-    if (coop_id) {
-      query = `
-        SELECT 
-          a.${timeColumn} AS time,
-          a.coop_id,
-          a.avg_stress AS acoustic_stress,
-          a.total_vocalizations,
-          v.avg_huddling AS huddling_index
-        FROM ${range === '30d' ? 'acoustic_daily' : 'acoustic_hourly'} a
-        FULL OUTER JOIN ${range === '30d' ? 'vision_daily' : 'vision_hourly'} v 
-          ON a.${timeColumn} = v.${timeColumn} AND a.coop_id = v.coop_id
-        WHERE a.${timeColumn} >= NOW() - INTERVAL '${interval}'
-          AND a.coop_id = $1
-        ORDER BY time ASC;
-      `;
-      params.push(coop_id);
-    } else {
-      query = `
-        SELECT 
-          a.${timeColumn} AS time,
-          a.coop_id,
-          a.avg_stress AS acoustic_stress,
-          a.total_vocalizations,
-          v.avg_huddling AS huddling_index
-        FROM ${range === '30d' ? 'acoustic_daily' : 'acoustic_hourly'} a
-        FULL OUTER JOIN ${range === '30d' ? 'vision_daily' : 'vision_hourly'} v 
-          ON a.${timeColumn} = v.${timeColumn} AND a.coop_id = v.coop_id
-        WHERE a.${timeColumn} >= NOW() - INTERVAL '${interval}'
-        ORDER BY time ASC;
-      `;
+    if (MODE === 'sim') {
+      const hours = range === '7d' ? 168 : range === '30d' ? 720 : 24;
+      const rows = [];
+      const coops = coop_id ? COOPS.filter(c => c.id === Number(coop_id)) : COOPS;
+      for (let h = hours; h >= 0; h -= 2) {
+        coops.forEach(c => {
+          rows.push({
+            time: new Date(Date.now() - h * 3600000).toISOString(),
+            coop_id: c.id,
+            acoustic_stress: parseFloat((0.20 + Math.sin(h * 0.1) * 0.08 + Math.sin(h * 0.03) * 0.04).toFixed(2)),
+            total_vocalizations: Math.floor(30 + Math.sin(h * 0.15) * 15),
+            huddling_index: parseFloat((0.25 + Math.sin(h * 0.08) * 0.08).toFixed(2)),
+          });
+        });
+      }
+      return res.json(rows);
     }
-
+    let interval = '24 hours';
+    let timeColumn = 'bucket';
+    if (range === '7d') interval = '7 days';
+    else if (range === '30d') interval = '30 days';
+    const viewA = range === '30d' ? 'acoustic_daily' : 'acoustic_hourly';
+    const viewV = range === '30d' ? 'vision_daily' : 'vision_hourly';
+    const query = coop_id
+      ? `SELECT a.${timeColumn} AS time, a.coop_id, a.avg_stress AS acoustic_stress, a.total_vocalizations, v.avg_huddling AS huddling_index FROM ${viewA} a FULL OUTER JOIN ${viewV} v ON a.${timeColumn}=v.${timeColumn} AND a.coop_id=v.coop_id WHERE a.${timeColumn}>=NOW()-INTERVAL '${interval}' AND a.coop_id=$1 ORDER BY time ASC;`
+      : `SELECT a.${timeColumn} AS time, a.coop_id, a.avg_stress AS acoustic_stress, a.total_vocalizations, v.avg_huddling AS huddling_index FROM ${viewA} a FULL OUTER JOIN ${viewV} v ON a.${timeColumn}=v.${timeColumn} AND a.coop_id=v.coop_id WHERE a.${timeColumn}>=NOW()-INTERVAL '${interval}' ORDER BY time ASC;`;
+    const params = coop_id ? [coop_id] : [];
     const result = await pool.query(query, params);
     res.json(result.rows);
   } catch (err) {
@@ -209,103 +268,102 @@ app.get('/api/stress/history', async (req, res) => {
   }
 });
 
-/**
- * GET /api/yield
- * Production history and simple forecasts
- */
+// GET /api/yield
 app.get('/api/yield', async (req, res) => {
   try {
-    // Fetch last 30 days of daily egg yields
-    const yieldQuery = `
-      SELECT time, coop_id, quantity, cracked, dirty 
-      FROM egg_yield 
-      WHERE time >= NOW() - INTERVAL '30 days' 
-      ORDER BY time ASC;
-    `;
-    const yieldResult = await pool.query(yieldQuery);
-    
-    // Simple Yield Forecasting: 3-day moving average
-    const forecastQuery = `
-      WITH recent_yields AS (
-        SELECT coop_id, quantity, 
-               ROW_NUMBER() OVER(PARTITION BY coop_id ORDER BY time DESC) as rn
-        FROM egg_yield
-      )
-      SELECT coop_id, ROUND(AVG(quantity)) as forecasted_yield
-      FROM recent_yields
-      WHERE rn <= 3
-      GROUP BY coop_id;
-    `;
-    const forecastResult = await pool.query(forecastQuery);
-
-    res.json({
-      history: yieldResult.rows,
-      forecast: forecastResult.rows
-    });
+    if (MODE === 'sim') {
+      const history = [];
+      const forecast = [];
+      for (let d = 30; d >= 0; d--) {
+        const day = new Date(Date.now() - d * 86400000).toISOString().split('T')[0];
+        COOPS.forEach(c => {
+          const baseQty = c.type === 'cage' ? 270 : 90;
+          const qty = Math.max(0, Math.floor(baseQty + Math.sin(d * 0.4) * 15 + Math.sin(d * 0.1) * 8));
+          history.push({ time: day, coop_id: c.id, quantity: qty, cracked: Math.floor(qty * 0.01), dirty: Math.floor(qty * 0.015) });
+        });
+      }
+      COOPS.forEach(c => {
+        forecast.push({ coop_id: c.id, forecasted_yield: c.type === 'cage' ? 270 : 90 });
+      });
+      return res.json({ history, forecast });
+    }
+    const yieldResult = await pool.query('SELECT time, coop_id, quantity, cracked, dirty FROM egg_yield WHERE time >= NOW() - INTERVAL \'30 days\' ORDER BY time ASC;');
+    const forecastResult = await pool.query(
+      'WITH recent_yields AS (SELECT coop_id, quantity, ROW_NUMBER() OVER(PARTITION BY coop_id ORDER BY time DESC) as rn FROM egg_yield) SELECT coop_id, ROUND(AVG(quantity)) as forecasted_yield FROM recent_yields WHERE rn <= 3 GROUP BY coop_id;'
+    );
+    res.json({ history: yieldResult.rows, forecast: forecastResult.rows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch egg yield data' });
   }
 });
 
-/**
- * GET /api/financials
- * Financial metrics and revenue protection statistics
- */
+// GET /api/financials
 app.get('/api/financials', async (req, res) => {
   try {
-    const eggPriceRand = 1.83; // Baseline R1,980 revenue / 1,080 eggs = R1.83 per egg
+    if (MODE === 'sim') {
+      const eggPriceRand = 1.83;
+      const capExRand = 44300;
+      const monthlyTargetRand = 59400;
+      // Build simulated stats
+      let totalEggs = 0, totalCracked = 0, totalDirty = 0;
+      for (let d = 30; d >= 0; d--) {
+        COOPS.forEach(c => {
+          const baseQty = c.type === 'cage' ? 270 : 90;
+          const qty = Math.max(0, Math.floor(baseQty + Math.sin(d * 0.4) * 15));
+          totalEggs += qty;
+          totalCracked += Math.floor(qty * 0.01);
+          totalDirty += Math.floor(qty * 0.015);
+        });
+      }
+      // Simulate some random stress events
+      const incidents = 3 + Math.floor(Math.sin(tick * 0.5) * 2);
+      const actualRevenue = totalEggs * eggPriceRand;
+      const eggsProtected = incidents * 162;
+      const revenueProtected = eggsProtected * eggPriceRand;
+      return res.json({
+        capEx: capExRand,
+        monthlyTarget: monthlyTargetRand,
+        eggPrice: eggPriceRand,
+        last30Days: {
+          eggsProduced: totalEggs,
+          cracked: totalCracked,
+          dirty: totalDirty,
+          revenue: actualRevenue,
+          revenueProtected,
+          mitigationEvents: incidents,
+          percentOfTarget: (actualRevenue / monthlyTargetRand) * 100,
+        },
+        amortization: {
+          standardMonths: 7.4,
+          heatStressDays: 22,
+          currentProgressPercent: (actualRevenue / capExRand) * 100,
+        },
+      });
+    }
+    const eggPriceRand = 1.83;
     const capExRand = 44300;
     const monthlyTargetRand = 59400;
-
-    // Get total eggs produced in the last 30 days
-    const yieldQuery = `
-      SELECT COALESCE(SUM(quantity), 0) AS total_eggs,
-             COALESCE(SUM(cracked), 0) AS total_cracked,
-             COALESCE(SUM(dirty), 0) AS total_dirty
-      FROM egg_yield
-      WHERE time >= NOW() - INTERVAL '30 days';
-    `;
-    const yieldResult = await pool.query(yieldQuery);
+    const yieldResult = await pool.query(
+      'SELECT COALESCE(SUM(quantity), 0) AS total_eggs, COALESCE(SUM(cracked), 0) AS total_cracked, COALESCE(SUM(dirty), 0) AS total_dirty FROM egg_yield WHERE time >= NOW() - INTERVAL \'30 days\';'
+    );
     const stats = yieldResult.rows[0];
-    
     const totalEggs = parseInt(stats.total_eggs);
     const actualRevenue = totalEggs * eggPriceRand;
-    
-    // Calculate stress incidents mitigated (heuristic based on temperature or ammonia stabilization)
-    // If telemetry shows NH3 > 20ppm or Temp > 32C, and then it drops back to normal, we count it as a mitigation
-    const mitigationQuery = `
-      SELECT COUNT(*) AS incidents
-      FROM telemetry
-      WHERE (temperature > 32.0 OR nh3_level > 20.0)
-        AND time >= NOW() - INTERVAL '30 days';
-    `;
-    const mitigationResult = await pool.query(mitigationQuery);
+    const mitigationResult = await pool.query(
+      'SELECT COUNT(*) AS incidents FROM telemetry WHERE (temperature > 32.0 OR nh3_level > 20.0) AND time >= NOW() - INTERVAL \'30 days\';'
+    );
     const incidents = parseInt(mitigationResult.rows[0].incidents);
-    
-    // Heuristic: Each mitigation event prevents a 5% drop in daily yield for 3 days
-    // 5% of 1080 eggs = 54 eggs. 54 eggs * 3 days = 162 eggs protected per incident.
     const eggsProtected = incidents * 162;
     const revenueProtected = eggsProtected * eggPriceRand;
-
     res.json({
-      capEx: capExRand,
-      monthlyTarget: monthlyTargetRand,
-      eggPrice: eggPriceRand,
+      capEx: capExRand, monthlyTarget: monthlyTargetRand, eggPrice: eggPriceRand,
       last30Days: {
-        eggsProduced: totalEggs,
-        cracked: parseInt(stats.total_cracked),
-        dirty: parseInt(stats.total_dirty),
-        revenue: actualRevenue,
-        revenueProtected: revenueProtected,
-        mitigationEvents: incidents,
-        percentOfTarget: (actualRevenue / monthlyTargetRand) * 100
+        eggsProduced: totalEggs, cracked: parseInt(stats.total_cracked), dirty: parseInt(stats.total_dirty),
+        revenue: actualRevenue, revenueProtected, mitigationEvents: incidents,
+        percentOfTarget: (actualRevenue / monthlyTargetRand) * 100,
       },
-      amortization: {
-        standardMonths: 7.4,
-        heatStressDays: 22,
-        currentProgressPercent: (actualRevenue / capExRand) * 100
-      }
+      amortization: { standardMonths: 7.4, heatStressDays: 22, currentProgressPercent: (actualRevenue / capExRand) * 100 },
     });
   } catch (err) {
     console.error(err);
@@ -313,9 +371,22 @@ app.get('/api/financials', async (req, res) => {
   }
 });
 
-// Start Server
-const server = app.listen(PORT, () => {
-  console.log(`🚀 Boonducks PLF API Server running on port ${PORT}`);
+// GET /api/health — simple health check
+app.get('/api/health', (req, res) => {
+  res.json({ status: 'ok', mode: MODE, uptime: process.uptime(), coops: COOPS.length });
 });
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({ error: 'Not found' });
+});
+
+// Start Server — only when run directly, not when required as a module (for testing)
+let server;
+if (require.main === module) {
+  server = app.listen(PORT, () => {
+    console.log(`🚀 Boonducks PLF API Server running on port ${PORT} (MODE=${MODE})`);
+  });
+}
 
 module.exports = { app, server };

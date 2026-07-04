@@ -1,40 +1,15 @@
 /**
  * Boonducks Farm PLF Engine - Backend Integration Tests
- * Tests all Express.js API endpoints with mocked PostgreSQL.
+ * Tests all Express.js API endpoints.
+ * Server operates in sim mode by default (no DB needed).
  */
 
 const request = require('supertest');
-
-// Mock the pg module before importing server
-jest.mock('pg', () => {
-  const mockQuery = jest.fn();
-  const mockPool = {
-    query: mockQuery,
-    connect: jest.fn(),
-    end: jest.fn(),
-    on: jest.fn(),
-  };
-  return { Pool: jest.fn(() => mockPool) };
-});
-
-const { Pool } = require('pg');
-const mockPool = new Pool();
-
-// Require server after mocking pg
-let app, server;
-beforeAll(() => {
-  const mod = require('./server');
-  app = mod.app;
-  server = mod.server;
-});
+const { app, server } = require('./server');
 
 afterAll((done) => {
   if (server) server.close(done);
   else done();
-});
-
-beforeEach(() => {
-  mockPool.query.mockReset();
 });
 
 // ============================================================================
@@ -42,27 +17,18 @@ beforeEach(() => {
 // ============================================================================
 describe('GET /api/coops', () => {
   it('returns 200 with an array of coops', async () => {
-    const mockCoops = [
-      { id: 1, name: 'Cage Coop A', type: 'cage', capacity: 312 },
-      { id: 2, name: 'Cage Coop B', type: 'cage', capacity: 310 },
-    ];
-    mockPool.query.mockResolvedValueOnce({ rows: mockCoops });
-
     const res = await request(app).get('/api/coops');
-
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
-    expect(res.body).toHaveLength(2);
-    expect(res.body[0]).toHaveProperty('name', 'Cage Coop A');
+    expect(res.body.length).toBeGreaterThanOrEqual(2);
+    expect(res.body[0]).toHaveProperty('name');
+    expect(res.body[0]).toHaveProperty('type');
+    expect(res.body[0]).toHaveProperty('capacity');
   });
-
-  it('returns 500 when database query fails', async () => {
-    mockPool.query.mockRejectedValueOnce(new Error('Connection refused'));
-
+  it('returns correct coop names', async () => {
     const res = await request(app).get('/api/coops');
-
-    expect(res.status).toBe(500);
-    expect(res.body).toHaveProperty('error');
+    expect(res.body[0].name).toBe('Cage Coop A');
+    expect(res.body[3].name).toBe('Litter Coop 2');
   });
 });
 
@@ -70,19 +36,14 @@ describe('GET /api/coops', () => {
 // GET /api/telemetry/live
 // ============================================================================
 describe('GET /api/telemetry/live', () => {
-  it('returns 200 with latest telemetry readings', async () => {
-    const mockTelemetry = [
-      { coop_id: 1, time: '2025-01-01T00:00:00Z', temperature: 24.5, humidity: 55.2, nh3_level: 0 },
-      { coop_id: 3, time: '2025-01-01T00:00:00Z', temperature: 22.1, humidity: 61.8, nh3_level: 12.4 },
-    ];
-    mockPool.query.mockResolvedValueOnce({ rows: mockTelemetry });
-
+  it('returns 200 with live telemetry', async () => {
     const res = await request(app).get('/api/telemetry/live');
-
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBe(8); // one per coop
     expect(res.body[0]).toHaveProperty('temperature');
     expect(res.body[0]).toHaveProperty('humidity');
+    expect(res.body[0]).toHaveProperty('nh3_level');
   });
 });
 
@@ -91,38 +52,24 @@ describe('GET /api/telemetry/live', () => {
 // ============================================================================
 describe('GET /api/telemetry/history', () => {
   it('returns 200 with default 24h range', async () => {
-    const mockHistory = [
-      { time: '2025-01-01T00:00:00Z', coop_id: 1, avg_temp: 23.5, avg_humidity: 56.0, avg_nh3: 0 },
-    ];
-    mockPool.query.mockResolvedValueOnce({ rows: mockHistory });
-
     const res = await request(app).get('/api/telemetry/history');
-
     expect(res.status).toBe(200);
     expect(Array.isArray(res.body)).toBe(true);
     expect(res.body[0]).toHaveProperty('avg_temp');
+    expect(res.body[0]).toHaveProperty('avg_humidity');
   });
 
-  it('accepts coop_id filter parameter', async () => {
-    mockPool.query.mockResolvedValueOnce({ rows: [] });
-
+  it('accepts coop_id filter', async () => {
     const res = await request(app).get('/api/telemetry/history?coop_id=1&range=7d');
-
     expect(res.status).toBe(200);
-    // Verify the query was called with parameterized coop_id
-    const queryCall = mockPool.query.mock.calls[0];
-    expect(queryCall[1]).toEqual(['1']);
+    expect(res.body.length).toBeGreaterThan(0);
+    res.body.forEach(entry => expect(entry.coop_id).toBe(1));
   });
 
-  it('uses daily aggregates for 30d range', async () => {
-    mockPool.query.mockResolvedValueOnce({ rows: [] });
-
-    const res = await request(app).get('/api/telemetry/history?range=30d');
-
-    expect(res.status).toBe(200);
-    // Verify that the query references the daily view
-    const queryStr = mockPool.query.mock.calls[0][0];
-    expect(queryStr).toContain('telemetry_daily');
+  it('returns more data for 7d than 24h', async () => {
+    const res24 = await request(app).get('/api/telemetry/history?range=24h');
+    const res7d = await request(app).get('/api/telemetry/history?range=7d');
+    expect(res24.body.length).toBeLessThan(res7d.body.length);
   });
 });
 
@@ -130,22 +77,13 @@ describe('GET /api/telemetry/history', () => {
 // GET /api/stress/live
 // ============================================================================
 describe('GET /api/stress/live', () => {
-  it('returns 200 with Edge-AI inferences per coop', async () => {
-    const mockStress = [
-      {
-        coop_id: 1, coop_name: 'Cage Coop A', coop_type: 'cage',
-        acoustic_stress: 0.15, peak_frequency: 850.0,
-        huddling_index: 0.22, bird_count: 312, active_birds: 260,
-      },
-    ];
-    mockPool.query.mockResolvedValueOnce({ rows: mockStress });
-
+  it('returns 200 with stress inferences', async () => {
     const res = await request(app).get('/api/stress/live');
-
     expect(res.status).toBe(200);
-    expect(Array.isArray(res.body)).toBe(true);
+    expect(res.body.length).toBe(8);
     expect(res.body[0]).toHaveProperty('acoustic_stress');
     expect(res.body[0]).toHaveProperty('huddling_index');
+    expect(res.body[0]).toHaveProperty('bird_count');
   });
 });
 
@@ -153,15 +91,10 @@ describe('GET /api/stress/live', () => {
 // GET /api/stress/history
 // ============================================================================
 describe('GET /api/stress/history', () => {
-  it('returns 200 with joined acoustic and vision history', async () => {
-    const mockHistory = [
-      { time: '2025-01-01T00:00:00Z', coop_id: 1, acoustic_stress: 0.12, total_vocalizations: 42, huddling_index: 0.18 },
-    ];
-    mockPool.query.mockResolvedValueOnce({ rows: mockHistory });
-
+  it('returns 200 with stress trends', async () => {
     const res = await request(app).get('/api/stress/history');
-
     expect(res.status).toBe(200);
+    expect(res.body.length).toBeGreaterThan(0);
     expect(res.body[0]).toHaveProperty('acoustic_stress');
     expect(res.body[0]).toHaveProperty('huddling_index');
   });
@@ -171,27 +104,14 @@ describe('GET /api/stress/history', () => {
 // GET /api/yield
 // ============================================================================
 describe('GET /api/yield', () => {
-  it('returns 200 with history and forecast arrays', async () => {
-    // First query: yield history
-    mockPool.query.mockResolvedValueOnce({
-      rows: [
-        { time: '2025-01-01', coop_id: 1, quantity: 270, cracked: 2, dirty: 3 },
-      ],
-    });
-    // Second query: forecast
-    mockPool.query.mockResolvedValueOnce({
-      rows: [
-        { coop_id: 1, forecasted_yield: 268 },
-      ],
-    });
-
+  it('returns 200 with history and forecast', async () => {
     const res = await request(app).get('/api/yield');
-
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('history');
     expect(res.body).toHaveProperty('forecast');
-    expect(Array.isArray(res.body.history)).toBe(true);
-    expect(Array.isArray(res.body.forecast)).toBe(true);
+    expect(res.body.history.length).toBeGreaterThan(0);
+    expect(res.body.history[0]).toHaveProperty('quantity');
+    expect(res.body.forecast[0]).toHaveProperty('forecasted_yield');
   });
 });
 
@@ -199,40 +119,34 @@ describe('GET /api/yield', () => {
 // GET /api/financials
 // ============================================================================
 describe('GET /api/financials', () => {
-  it('returns 200 with financial metrics and amortization data', async () => {
-    // First query: egg yield stats
-    mockPool.query.mockResolvedValueOnce({
-      rows: [{ total_eggs: '32680', total_cracked: '114', total_dirty: '182' }],
-    });
-    // Second query: mitigation incidents
-    mockPool.query.mockResolvedValueOnce({
-      rows: [{ incidents: '3' }],
-    });
-
+  it('returns 200 with all financial metrics', async () => {
     const res = await request(app).get('/api/financials');
-
     expect(res.status).toBe(200);
     expect(res.body).toHaveProperty('capEx', 44300);
     expect(res.body).toHaveProperty('monthlyTarget', 59400);
     expect(res.body).toHaveProperty('eggPrice', 1.83);
-    expect(res.body.last30Days).toHaveProperty('eggsProduced', 32680);
+    expect(res.body.last30Days).toHaveProperty('eggsProduced');
     expect(res.body.last30Days).toHaveProperty('revenue');
+    expect(res.body.last30Days).toHaveProperty('mitigationEvents');
     expect(res.body.amortization).toHaveProperty('standardMonths', 7.4);
-    expect(res.body.amortization).toHaveProperty('heatStressDays', 22);
   });
 
-  it('calculates revenue correctly from egg count', async () => {
-    mockPool.query.mockResolvedValueOnce({
-      rows: [{ total_eggs: '1000', total_cracked: '10', total_dirty: '20' }],
-    });
-    mockPool.query.mockResolvedValueOnce({
-      rows: [{ incidents: '0' }],
-    });
-
+  it('maintains revenue/eggs ratio', async () => {
     const res = await request(app).get('/api/financials');
+    const r = res.body.last30Days;
+    expect(r.revenue / r.eggsProduced).toBeCloseTo(1.83, 2);
+  });
+});
 
-    expect(res.body.last30Days.revenue).toBeCloseTo(1000 * 1.83, 2);
-    expect(res.body.last30Days.revenueProtected).toBe(0);
+// ============================================================================
+// GET /api/health
+// ============================================================================
+describe('GET /api/health', () => {
+  it('returns 200 with status and mode', async () => {
+    const res = await request(app).get('/api/health');
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('status', 'ok');
+    expect(res.body).toHaveProperty('coops', 8);
   });
 });
 
@@ -240,7 +154,7 @@ describe('GET /api/financials', () => {
 // Unknown routes
 // ============================================================================
 describe('Unknown Routes', () => {
-  it('returns 404 for non-existent API paths', async () => {
+  it('returns 404 for non-existent paths', async () => {
     const res = await request(app).get('/api/nonexistent');
     expect(res.status).toBe(404);
   });

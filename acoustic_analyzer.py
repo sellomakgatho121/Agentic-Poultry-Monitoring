@@ -30,8 +30,8 @@ except ImportError:
     HAS_DB = False
 
 try:
-    from scipy.signal import welch, find_peaks
-    HAS_SCIPY = True
+    import scipy
+    HAS_SCIPY = True  # scipy itself is available; sub-imports may still fail at runtime
 except ImportError:
     HAS_SCIPY = False
 
@@ -142,26 +142,17 @@ def generate_synthetic_signal(stress_factor=0.2, duration=2.0, sample_rate=16000
 def analyze_frequency_spectrum(signal, sample_rate=16000):
     """
     Analyze the frequency spectrum of an audio signal to extract stress indicators.
-    
+
     Returns:
         dict with stress_level, peak_frequency, vocalization_count, and band energies
     """
-    if HAS_SCIPY:
-        # Use Welch's method for power spectral density estimation
-        freqs, psd = welch(signal, fs=sample_rate, nperseg=min(1024, len(signal)))
-        
-        # Find peaks in the spectrum
-        peaks, properties = find_peaks(psd, height=np.max(psd) * 0.1, distance=20)
-        peak_freqs = freqs[peaks] if len(peaks) > 0 else np.array([0])
-        peak_freq = float(peak_freqs[np.argmax(psd[peaks])]) if len(peaks) > 0 else 0.0
-    else:
-        # Fallback: Use numpy FFT
-        fft_vals = np.abs(np.fft.rfft(signal))
-        freqs = np.fft.rfftfreq(len(signal), d=1.0 / sample_rate)
-        psd = fft_vals ** 2
-        peak_idx = np.argmax(psd[1:]) + 1  # Skip DC component
-        peak_freq = float(freqs[peak_idx])
-        peaks = np.where(psd > np.max(psd) * 0.1)[0]
+    # Use numpy FFT (works on all platforms; scipy.signal.welch may hang on some ARM builds)
+    fft_vals = np.abs(np.fft.rfft(signal))
+    freqs = np.fft.rfftfreq(len(signal), d=1.0 / sample_rate)
+    psd = fft_vals ** 2
+    peak_idx = np.argmax(psd[1:]) + 1  # Skip DC component
+    peak_freq = float(freqs[peak_idx])
+    peaks = np.where(psd > np.max(psd) * 0.1)[0]
     
     # Calculate energy in each vocalization band
     def band_energy(f_low, f_high):

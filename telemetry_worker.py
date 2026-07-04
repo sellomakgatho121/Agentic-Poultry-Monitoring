@@ -11,10 +11,21 @@ import os
 import sys
 import time
 import logging
-import psycopg2
-from psycopg2.extras import execute_values
-import minimalmodbus
-import serial
+
+# Conditionally import hardware-dependent libraries
+try:
+    import psycopg2
+    from psycopg2.extras import execute_values
+    HAS_DB = True
+except ImportError:
+    HAS_DB = False
+
+try:
+    import minimalmodbus
+    import serial
+    HAS_SERIAL = True
+except ImportError:
+    HAS_SERIAL = False
 
 # Configure logging
 logging.basicConfig(
@@ -68,6 +79,9 @@ COOP_SENSORS = {
 
 def get_instrument(port, slave_addr):
     """Create and configure a minimalmodbus Instrument instance."""
+    if not HAS_SERIAL:
+        logger.warning("Serial libraries not available. Skipping Modbus read.")
+        return None
     try:
         instrument = minimalmodbus.Instrument(port, slave_addr)
         instrument.serial.baudrate = BAUDRATE
@@ -153,12 +167,15 @@ def main():
     logger.info("Starting Boonducks Farm PLF Telemetry Ingestion Daemon...")
     logger.info(f"Configured serial port: {SERIAL_PORT} @ {BAUDRATE} baud")
     logger.info(f"Polling interval: {POLL_INTERVAL} seconds")
+    logger.info(f"psycopg2: {'✅' if HAS_DB else '❌ (no DB writes)'} | "
+                f"Serial: {'✅' if HAS_SERIAL else '❌ (simulation mode)'}")
 
+    from datetime import datetime as dt_mod
     db_conn = None
-    
+
     while True:
-        # Ensure database connection is active
-        if db_conn is None or db_conn.closed:
+        # Ensure database connection is active (only if psycopg2 is available)
+        if HAS_DB and (db_conn is None or db_conn.closed):
             logger.info("Connecting to database...")
             db_conn = get_db_connection()
             if db_conn is None:
@@ -169,7 +186,10 @@ def main():
 
         start_time = time.time()
         readings = []
-        timestamp = psycopg2.TimestampFromTicks(start_time)
+        try:
+            timestamp = psycopg2.TimestampFromTicks(start_time) if HAS_DB else dt_mod.utcnow()
+        except:
+            timestamp = dt_mod.utcnow()
 
         # Poll all configured sensors
         for coop_id, addrs in COOP_SENSORS.items():
@@ -196,21 +216,24 @@ def main():
 
         # Batch insert readings into TimescaleDB
         if readings:
-            try:
-                with db_conn.cursor() as cur:
-                    query = """
-                        INSERT INTO telemetry (time, coop_id, temperature, humidity, nh3_level)
-                        VALUES %s
-                    """
-                    execute_values(cur, query, readings)
-                db_conn.commit()
-                logger.info(f"Successfully ingested {len(readings)} telemetry records into TimescaleDB.")
-            except Exception as e:
-                logger.error(f"Failed to insert telemetry data into database: {e}")
-                db_conn.rollback()
-                # If database error occurs, close connection to trigger reconnect on next loop
-                db_conn.close()
-                db_conn = None
+            if db_conn is not None:
+                try:
+                    with db_conn.cursor() as cur:
+                        query = """
+                            INSERT INTO telemetry (time, coop_id, temperature, humidity, nh3_level)
+                            VALUES %s
+                        """
+                        execute_values(cur, query, readings)
+                    db_conn.commit()
+                    logger.info(f"Successfully ingested {len(readings)} telemetry records into TimescaleDB.")
+                except Exception as e:
+                    logger.error(f"Failed to insert telemetry data into database: {e}")
+                    db_conn.rollback()
+                    # If database error occurs, close connection to trigger reconnect on next loop
+                    db_conn.close()
+                    db_conn = None
+            else:
+                logger.info(f"📊 Generated {len(readings)} records (DB offline, simulation only).")
         else:
             logger.warning("No telemetry data collected in this cycle.")
 

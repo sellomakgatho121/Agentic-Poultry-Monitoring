@@ -1,0 +1,111 @@
+# ============================================================================
+# Boonducks Farm PLF Engine — Docker Compose
+# Full stack: TimescaleDB + API server + Python AI workers
+# ============================================================================
+#
+# Quick start:
+#   docker compose up -d
+#   docker compose logs -f
+#
+# For local dev without Docker, see:
+#   bash scripts/start.sh
+#
+# NOTE: Python workers require a virtual display for vision_analyzer.py.
+# The workers container below includes Xvfb for this purpose.
+
+services:
+
+  # ==========================================================================
+  # Time-Series Database
+  # ==========================================================================
+  timescaledb:
+    image: timescale/timescaledb:2-pg16
+    container_name: boonducks-db
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: ${DB_USER:-postgres}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-postgres}
+      POSTGRES_DB: ${DB_NAME:-boonducks_plf}
+    volumes:
+      - timescaledb_data:/var/lib/postgresql/data
+      - ./schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-postgres} -d ${DB_NAME:-boonducks_plf}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 15s
+
+  # ==========================================================================
+  # API Server (Express.js + built frontend)
+  # ==========================================================================
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: boonducks-api
+    restart: unless-stopped
+    ports:
+      - "${API_PORT:-5000}:5000"
+    environment:
+      MODE: ${MODE:-live}
+      PORT: "5000"
+      DB_HOST: timescaledb
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-boonducks_plf}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      DATABASE_URL: postgresql://${DB_USER:-postgres}:${DB_PASSWORD:-postgres}@timescaledb:5432/${DB_NAME:-boonducks_plf}
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://localhost:5000/api/health || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # ==========================================================================
+  # Python AI Workers (Acoustic + Vision + Telemetry)
+  # ==========================================================================
+  workers:
+    build:
+      context: .
+      dockerfile: Dockerfile.workers
+    container_name: boonducks-workers
+    restart: unless-stopped
+    environment:
+      MODE: ${MODE:-live}
+      DB_HOST: timescaledb
+      DB_PORT: "5432"
+      DB_NAME: ${DB_NAME:-boonducks_plf}
+      DB_USER: ${DB_USER:-postgres}
+      DB_PASSWORD: ${DB_PASSWORD:-postgres}
+      SERIAL_PORT: ${SERIAL_PORT:-/dev/ttyUSB0}
+      BAUDRATE: ${BAUDRATE:-9600}
+      POLL_INTERVAL: ${POLL_INTERVAL:-10}
+      # Vision analyzer needs a display for frame capture
+      DISPLAY: ":99"
+    volumes:
+      - ./acoustic_analyzer.py:/app/acoustic_analyzer.py
+      - ./vision_analyzer.py:/app/vision_analyzer.py
+      - ./telemetry_worker.py:/app/telemetry_worker.py
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    # Run all three workers as subprocesses
+    command: >
+      sh -c "
+        echo '=== Starting AI Workers ===' &&
+        python3 /app/telemetry_worker.py &
+        python3 /app/acoustic_analyzer.py &
+        python3 /app/vision_analyzer.py &
+        echo 'All workers launched. Waiting...' &&
+        wait
+      "
+
+volumes:
+  timescaledb_data:

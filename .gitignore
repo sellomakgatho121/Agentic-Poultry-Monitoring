@@ -43,3 +43,19 @@ ENV/
 .venv
 pip-log.txt
 pip-delete-this-directory.txt
+
+# Logs
+*.log
+
+# Docker
+.dockerignore
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
