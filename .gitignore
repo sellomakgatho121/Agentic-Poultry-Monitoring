@@ -59,3 +59,8 @@ coverage/
 .vscode/
 *.swp
 *.swo
+node_modules/
+.venv/
+__pycache__/
+*.pyc
+*.log
