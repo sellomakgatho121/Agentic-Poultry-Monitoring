@@ -248,19 +248,56 @@ export default function App() {
     setActiveTab(simulatedAlert.target_tab || 'overview');
   };
 
-  // Coop-specific camera bounding boxes for visual variety
-  const getCoopCameraVisuals = (coopId) => {
-    const visuals = {
-      1: [{ top: '25%', left: '30%', w: '64px', h: '48px' }, { top: '52%', left: '48%', w: '56px', h: '56px' }, { top: '30%', left: '65%', w: '72px', h: '48px' }],
-      2: [{ top: '20%', left: '25%', w: '56px', h: '56px' }, { top: '55%', left: '55%', w: '64px', h: '48px' }, { top: '35%', left: '40%', w: '60px', h: '52px' }],
-      3: [{ top: '15%', left: '40%', w: '72px', h: '44px' }, { top: '45%', left: '30%', w: '56px', h: '52px' }, { top: '60%', left: '55%', w: '64px', h: '48px' }],
-      4: [{ top: '30%', left: '35%', w: '60px', h: '52px' }, { top: '20%', left: '60%', w: '64px', h: '48px' }, { top: '55%', left: '40%', w: '56px', h: '56px' }],
-      5: [{ top: '40%', left: '25%', w: '64px', h: '48px' }, { top: '25%', left: '50%', w: '56px', h: '52px' }, { top: '55%', left: '60%', w: '60px', h: '44px' }],
-      6: [{ top: '22%', left: '35%', w: '56px', h: '56px' }, { top: '50%', left: '30%', w: '64px', h: '48px' }, { top: '35%', left: '60%', w: '72px', h: '44px' }],
-      7: [{ top: '28%', left: '28%', w: '60px', h: '52px' }, { top: '52%', left: '48%', w: '56px', h: '48px' }, { top: '38%', left: '62%', w: '64px', h: '48px' }],
-      8: [{ top: '18%', left: '32%', w: '64px', h: '48px' }, { top: '45%', left: '55%', w: '60px', h: '52px' }, { top: '60%', left: '38%', w: '56px', h: '48px' }],
+  // Generate cage-battery or deep-litter visualization per coop
+  const getCageRows = (coopId, stressLevel) => {
+    // Each coop has a unique cage layout — rows × cages per row, hens per cage (2 or 3)
+    const layouts = {
+      1: { rows: 4, cages: [6,5,5,4], henGroups: [[3,2,3,2,3,2],[2,3,2,3,2],[3,2,3,2,3],[2,3,2,3]] },
+      2: { rows: 4, cages: [5,5,4,5], henGroups: [[2,3,2,3,2],[3,2,3,2,3],[2,3,2,3],[3,2,3,2,3]] },
+      3: { rows: 3, cages: [6,6,5], henGroups: [[3,2,3,2,3,2],[2,3,2,3,2,3],[3,2,3,2,3]] },    // actually deep-litter
+      4: { rows: 3, cages: [5,6,5], henGroups: [[2,3,2,3,2],[3,2,3,2,3,2],[2,3,2,3,2]] },
+      5: { rows: 4, cages: [4,5,5,4], henGroups: [[3,2,3,2],[2,3,2,3,2],[3,2,3,2,3],[2,3,2,3]] },
+      6: { rows: 3, cages: [6,5,6], henGroups: [[2,3,2,3,2,3],[3,2,3,2,3],[2,3,2,3,2,3]] },
+      7: { rows: 4, cages: [5,4,5,4], henGroups: [[2,3,2,3,2],[3,2,3,2],[2,3,2,3,2],[3,2,3,2]] },
+      8: { rows: 3, cages: [5,6,4], henGroups: [[3,2,3,2,3],[2,3,2,3,2,3],[3,2,3,2]] },
     };
-    return visuals[coopId] || visuals[1];
+    const layout = layouts[coopId] || layouts[1];
+    const rowH = 100 / (layout.rows + 1);
+    const cages = [];
+    layout.cages.forEach((nCages, ri) => {
+      const cageW = 80 / (nCages + 1);
+      const topPct = rowH * (ri + 0.5) - rowH * 0.3;
+      const groups = layout.henGroups[ri];
+      for (let ci = 0; ci < nCages; ci++) {
+        const leftPct = 10 + cageW * (ci + 0.5) - cageW * 0.35;
+        const hens = groups[ci] || 2;
+        const huddling = stressLevel > 0.6; // hens cluster when stressed
+        cages.push({
+          top: `${topPct}%`,
+          left: `${leftPct}%`,
+          w: `${cageW * 0.7}%`,
+          h: `${rowH * 0.6}%`,
+          hens,
+          huddling,
+        });
+      }
+    });
+    return cages;
+  };
+
+  // Deep-litter hen scatter locations — unique per coop
+  const getLitterHens = (coopId) => {
+    const layouts = {
+      1: [{t:22,l:28},{t:18,l:55},{t:35,l:42},{t:42,l:28},{t:50,l:58},{t:38,l:68},{t:55,l:40},{t:28,l:70},{t:48,l:20},{t:60,l:52},{t:20,l:40},{t:65,l:35}],
+      2: [{t:20,l:25},{t:25,l:50},{t:35,l:30},{t:48,l:55},{t:28,l:65},{t:55,l:35},{t:40,l:60},{t:50,l:20},{t:60,l:48},{t:22,l:60},{t:65,l:55},{t:18,l:42}],
+      3: [{t:15,l:40},{t:28,l:28},{t:45,l:30},{t:40,l:55},{t:55,l:60},{t:22,l:55},{t:50,l:42},{t:38,l:68},{t:60,l:35},{t:30,l:48},{t:65,l:45},{t:18,l:30}],
+      4: [{t:30,l:35},{t:20,l:60},{t:42,l:25},{t:50,l:50},{t:55,l:38},{t:35,l:55},{t:45,l:65},{t:60,l:55},{t:28,l:48},{t:22,l:38},{t:58,l:25},{t:65,l:42}],
+      5: [{t:40,l:25},{t:25,l:45},{t:35,l:60},{t:50,l:30},{t:55,l:50},{t:28,l:32},{t:45,l:42},{t:60,l:60},{t:22,l:58},{t:52,l:65},{t:65,l:30},{t:18,l:48}],
+      6: [{t:22,l:35},{t:35,l:28},{t:48,l:38},{t:42,l:55},{t:55,l:45},{t:30,l:55},{t:50,l:60},{t:25,l:48},{t:60,l:35},{t:38,l:65},{t:58,l:55},{t:20,l:28}],
+      7: [{t:28,l:25},{t:22,l:52},{t:40,l:35},{t:48,l:48},{t:35,l:62},{t:55,l:30},{t:50,l:55},{t:60,l:45},{t:30,l:42},{t:42,l:20},{t:58,l:60},{t:65,l:38}],
+      8: [{t:18,l:30},{t:32,l:45},{t:45,l:28},{t:42,l:58},{t:52,l:40},{t:28,l:55},{t:55,l:55},{t:38,l:20},{t:58,l:32},{t:25,l:38},{t:62,l:50},{t:20,l:62}],
+    };
+    return layouts[coopId] || layouts[1];
   };
 
   // Check if selected coop currently has an active alert
@@ -889,23 +926,141 @@ export default function App() {
                         : 'from-teal-500/5 via-transparent to-transparent'
                     }`} />
 
-                    {/* Simulated Bounding Boxes — unique per coop */}
-                    {getCoopCameraVisuals(selectedCoop).map((box, i) => (
-                      <div
-                        key={i}
-                        className="absolute border-2 rounded bg-opacity-5 flex items-start p-0.5 transition-all duration-500"
-                        style={{
-                          top: box.top,
-                          left: box.left,
-                          width: box.w,
-                          height: box.h,
-                          borderColor: selectedCoopStress.acoustic_stress > 0.6 ? 'rgba(239,68,68,0.6)' : 'rgba(45,212,191,0.6)',
-                          backgroundColor: selectedCoopStress.acoustic_stress > 0.6 ? 'rgba(239,68,68,0.05)' : 'rgba(45,212,191,0.05)',
-                        }}
-                      >
-                        <span className="text-[6px] font-mono text-teal-400 bg-slate-900/80 px-0.5 rounded">layer_hen {(85 + i * 3) % 100}%</span>
+                    {selectedCoopMeta.type === 'cage' ? (
+                      /* ── CAGE COOP: Battery cage rows with 2-3 hens per cage ── */
+                      <div className="absolute inset-0 p-[5%]">
+                        {getCageRows(selectedCoop, selectedCoopStress.acoustic_stress).map((cage, i) => {
+                          const isStressed = selectedCoopStress.acoustic_stress > 0.6;
+                          const stressColor = isStressed ? 'rgba(239,68,68,0.5)' : 'rgba(45,212,191,0.5)';
+                          return (
+                            <div
+                              key={i}
+                              className="absolute"
+                              style={{ top: cage.top, left: cage.left, width: cage.w, height: cage.h }}
+                            >
+                              {/* Cage wire frame */}
+                              <div
+                                className="absolute inset-0 rounded-sm border"
+                                style={{
+                                  borderColor: stressColor,
+                                  background: isStressed ? 'rgba(239,68,68,0.04)' : 'rgba(45,212,191,0.04)',
+                                  boxShadow: `inset 0 0 6px ${stressColor.replace('0.5','0.15')}`,
+                                }}
+                              >
+                                {/* Wire mesh vertical lines */}
+                                <svg className="absolute inset-0 w-full h-full opacity-20" viewBox="0 0 100 100" preserveAspectRatio="none">
+                                  <line x1="25" y1="0" x2="25" y2="100" stroke={isStressed ? '#ef4444' : '#14b8a6'} strokeWidth="0.3" />
+                                  <line x1="50" y1="0" x2="50" y2="100" stroke={isStressed ? '#ef4444' : '#14b8a6'} strokeWidth="0.3" />
+                                  <line x1="75" y1="0" x2="75" y2="100" stroke={isStressed ? '#ef4444' : '#14b8a6'} strokeWidth="0.3" />
+                                  <line x1="0" y1="33" x2="100" y2="33" stroke={isStressed ? '#ef4444' : '#14b8a6'} strokeWidth="0.3" />
+                                  <line x1="0" y1="66" x2="100" y2="66" stroke={isStressed ? '#ef4444' : '#14b8a6'} strokeWidth="0.3" />
+                                </svg>
+                                {/* Label */}
+                                <span className="absolute -top-2.5 left-0 text-[5px] font-mono text-slate-500 bg-[#121624] px-0.5 rounded">
+                                  CAGE {i + 1}
+                                </span>
+                              </div>
+                              {/* 2-3 Hens inside the cage */}
+                              {Array.from({ length: cage.hens }).map((_, hi) => {
+                                const isHuddling = cage.huddling && cage.hens > 2;
+                                const pos = isHuddling
+                                  ? { top: `${30 + hi * 20}%`, left: `${20 + hi * 25}%` }  // huddled together
+                                  : { top: `${20 + hi * 15 + (i % 2) * 10}%`, left: `${15 + hi * 30 + (i % 3) * 8}%` };
+                                return (
+                                  <div
+                                    key={hi}
+                                    className="absolute flex items-center justify-center"
+                                    style={{
+                                      ...pos,
+                                      width: cage.huddling ? '30%' : '28%',
+                                      height: cage.huddling ? '45%' : '40%',
+                                    }}
+                                  >
+                                    {/* Hen body (oval) */}
+                                    <div
+                                      className="rounded-full opacity-90"
+                                      style={{
+                                        width: '80%',
+                                        height: '65%',
+                                        background: isStressed
+                                          ? `radial-gradient(ellipse, #fbbf24 40%, #b45309 100%)`
+                                          : `radial-gradient(ellipse, #f5f5f4 40%, #a8a29e 100%)`,
+                                        boxShadow: `0 1px 2px rgba(0,0,0,0.3)`,
+                                      }}
+                                    >
+                                      {/* Comb (small red dot on top) */}
+                                      <div
+                                        className="mx-auto rounded-full"
+                                        style={{
+                                          width: '20%',
+                                          height: '18%',
+                                          background: '#dc2626',
+                                          marginTop: '-2px',
+                                        }}
+                                      />
+                                      {/* Eye */}
+                                      <div
+                                        className="mx-auto rounded-full"
+                                        style={{
+                                          width: '12%',
+                                          height: '12%',
+                                          background: '#000',
+                                          marginTop: '2px',
+                                        }}
+                                      />
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          );
+                        })}
                       </div>
-                    ))}
+                    ) : (
+                      /* ── DEEP LITTER COOP: Scattered hens with bounding boxes ── */
+                      <div className="absolute inset-0">
+                        {/* Floor line */}
+                        <div className="absolute bottom-[15%] left-[5%] right-[5%] h-[2px] opacity-20"
+                          style={{ background: 'linear-gradient(90deg, transparent, #78716c, transparent)' }} />
+                        {getLitterHens(selectedCoop).map((hen, i) => {
+                          const isStressed = selectedCoopStress.acoustic_stress > 0.6;
+                          const stressColor = isStressed ? 'rgba(239,68,68,0.6)' : 'rgba(45,212,191,0.6)';
+                          return (
+                            <div
+                              key={i}
+                              className="absolute border rounded bg-opacity-5 flex items-start p-0.5 transition-all duration-500"
+                              style={{
+                                top: `${hen.t}%`,
+                                left: `${hen.l}%`,
+                                width: '48px',
+                                height: '36px',
+                                borderColor: stressColor,
+                                backgroundColor: isStressed ? 'rgba(239,68,68,0.05)' : 'rgba(45,212,191,0.05)',
+                                transform: `rotate(${(i * 17 + 5) % 30 - 15}deg)`,
+                              }}
+                            >
+                              {/* Hen silhouette inside box */}
+                              <div
+                                className="rounded-full mx-auto mt-0.5"
+                                style={{
+                                  width: '70%',
+                                  height: '65%',
+                                  background: isStressed
+                                    ? 'radial-gradient(ellipse, #fbbf24 40%, #b45309 100%)'
+                                    : 'radial-gradient(ellipse, #f5f5f4 40%, #a8a29e 100%)',
+                                }}
+                              >
+                                <div className="mx-auto rounded-full bg-red-600"
+                                  style={{ width: '16%', height: '16%', marginTop: '-1px' }} />
+                              </div>
+                              <span className="text-[5px] font-mono text-teal-400 bg-slate-900/80 px-0.5 rounded absolute -bottom-3 left-0 whitespace-nowrap">
+                                layer_hen {(87 + i * 2) % 99}%
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
                     {/* Camera Feed HUD */}
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-slate-950/80 px-2 py-0.5 rounded text-[8px] font-mono text-slate-300">
