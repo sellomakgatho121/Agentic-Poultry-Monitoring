@@ -217,6 +217,8 @@ export default function App() {
       setSimulatedAlert({
         title: 'CRITICAL WARNING: HEAT STRESS DETECTED',
         coop: 'Cage Coop A',
+        coop_id: 1,
+        target_tab: 'overview',
         message: 'Acoustic stress index spiked to 0.84. Huddling index is 0.76. Automating misting systems.',
         level: 'danger'
       });
@@ -227,6 +229,8 @@ export default function App() {
       setSimulatedAlert({
         title: 'WARNING: AMMONIA (NH3) LEVEL ELEVATED',
         coop: 'Litter Coop 1',
+        coop_id: 3,
+        target_tab: 'telemetry',
         message: 'Electrochemical NH3 probe reports 22.4 ppm. Recommended: Activate auxiliary ventilation.',
         level: 'warning'
       });
@@ -236,6 +240,31 @@ export default function App() {
       fetchData(); // reset
     }
   };
+
+  // Click alert → navigate to the affected coop and relevant tab
+  const handleAlertClick = () => {
+    if (!simulatedAlert) return;
+    setSelectedCoop(simulatedAlert.coop_id || 1);
+    setActiveTab(simulatedAlert.target_tab || 'overview');
+  };
+
+  // Coop-specific camera bounding boxes for visual variety
+  const getCoopCameraVisuals = (coopId) => {
+    const visuals = {
+      1: [{ top: '25%', left: '30%', w: '64px', h: '48px' }, { top: '52%', left: '48%', w: '56px', h: '56px' }, { top: '30%', left: '65%', w: '72px', h: '48px' }],
+      2: [{ top: '20%', left: '25%', w: '56px', h: '56px' }, { top: '55%', left: '55%', w: '64px', h: '48px' }, { top: '35%', left: '40%', w: '60px', h: '52px' }],
+      3: [{ top: '15%', left: '40%', w: '72px', h: '44px' }, { top: '45%', left: '30%', w: '56px', h: '52px' }, { top: '60%', left: '55%', w: '64px', h: '48px' }],
+      4: [{ top: '30%', left: '35%', w: '60px', h: '52px' }, { top: '20%', left: '60%', w: '64px', h: '48px' }, { top: '55%', left: '40%', w: '56px', h: '56px' }],
+      5: [{ top: '40%', left: '25%', w: '64px', h: '48px' }, { top: '25%', left: '50%', w: '56px', h: '52px' }, { top: '55%', left: '60%', w: '60px', h: '44px' }],
+      6: [{ top: '22%', left: '35%', w: '56px', h: '56px' }, { top: '50%', left: '30%', w: '64px', h: '48px' }, { top: '35%', left: '60%', w: '72px', h: '44px' }],
+      7: [{ top: '28%', left: '28%', w: '60px', h: '52px' }, { top: '52%', left: '48%', w: '56px', h: '48px' }, { top: '38%', left: '62%', w: '64px', h: '48px' }],
+      8: [{ top: '18%', left: '32%', w: '64px', h: '48px' }, { top: '45%', left: '55%', w: '60px', h: '52px' }, { top: '60%', left: '38%', w: '56px', h: '48px' }],
+    };
+    return visuals[coopId] || visuals[1];
+  };
+
+  // Check if selected coop currently has an active alert
+  const hasActiveAlert = simulatedAlert && selectedCoop === simulatedAlert.coop_id;
 
   // Filter history data for selected coop
   const selectedCoopHistory = historyData.filter(h => h.coop_id === selectedCoop);
@@ -311,18 +340,22 @@ export default function App() {
             exit={{ opacity: 0, y: -20 }}
             className="mx-6 mt-4"
           >
-            <div className={`p-4 rounded-xl border flex gap-3 ${
-              simulatedAlert.level === 'danger' 
-                ? 'bg-red-950/30 border-red-500/40 text-red-200' 
-                : 'bg-amber-950/30 border-amber-500/40 text-amber-200'
-            }`}>
+            <div
+              onClick={handleAlertClick}
+              className={`p-4 rounded-xl border flex gap-3 cursor-pointer transition-all hover:scale-[1.01] ${
+                simulatedAlert.level === 'danger'
+                  ? 'bg-red-950/30 border-red-500/40 text-red-200 hover:border-red-400'
+                  : 'bg-amber-950/30 border-amber-500/40 text-amber-200 hover:border-amber-400'
+              }`}
+            >
               <AlertTriangle className="w-5 h-5 shrink-0 text-amber-400 animate-bounce" />
-              <div>
+              <div className="flex-1">
                 <h3 className="text-sm font-bold uppercase tracking-wider">{simulatedAlert.title}</h3>
                 <p className="text-xs mt-1 opacity-90">{simulatedAlert.message}</p>
-                <div className="flex gap-2 mt-2">
+                <div className="flex gap-2 mt-2 flex-wrap">
                   <span className="text-[10px] bg-white/5 border border-white/10 px-2 py-0.5 rounded font-mono">Coop: {simulatedAlert.coop}</span>
                   <span className="text-[10px] bg-teal-500/10 text-teal-400 border border-teal-500/20 px-2 py-0.5 rounded font-mono">Automated Mitigation Active</span>
+                  <span className="text-[10px] bg-cyan-500/10 text-cyan-400 border border-cyan-500/20 px-2 py-0.5 rounded font-mono">Click to navigate →</span>
                 </div>
               </div>
             </div>
@@ -476,7 +509,18 @@ export default function App() {
                   <div className="glass-panel p-6 rounded-xl">
                     <div className="flex justify-between items-center mb-6">
                       <div>
-                        <h2 className="text-base font-bold text-white">Environmental Trends ({selectedCoopMeta.name})</h2>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h2 className="text-base font-bold text-white">Environmental Trends ({selectedCoopMeta.name})</h2>
+                          {hasActiveAlert && (
+                            <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                              simulatedAlert.level === 'danger'
+                                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                            }`}>
+                              ⚠ ACTIVE ALERT
+                            </span>
+                          )}
+                        </div>
                         <p className="text-xs text-slate-400 mt-0.5">24-hour sensor telemetry logs</p>
                       </div>
                       <div className="flex gap-2">
@@ -522,7 +566,18 @@ export default function App() {
                 {/* Right Sidebar: Selected Coop Details & AI Inferences */}
                 <div className="space-y-6">
                   <div className="glass-panel p-6 rounded-xl">
-                    <h2 className="text-base font-bold text-white mb-4">Coop Insight: {selectedCoopMeta.name}</h2>
+                    <h2 className="text-base font-bold text-white mb-4 flex items-center gap-2 flex-wrap">
+                      Coop Insight: {selectedCoopMeta.name}
+                      {hasActiveAlert && (
+                        <span className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                          simulatedAlert.level === 'danger'
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
+                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        }`}>
+                          {simulatedAlert.level === 'danger' ? 'CRITICAL' : 'WARNING'}
+                        </span>
+                      )}
+                    </h2>
                     
                     <div className="space-y-4">
                       {/* Live Indicators */}
@@ -670,9 +725,26 @@ export default function App() {
                     {coops.map(coop => {
                       const tel = liveTelemetry.find(t => t.coop_id === coop.id) || { temperature: 0, humidity: 0, nh3_level: 0 };
                       return (
-                        <div key={coop.id} className="bg-[#121624] p-5 rounded-xl border border-white/5 space-y-4">
+                        <div key={coop.id} className={`bg-[#121624] p-5 rounded-xl border space-y-4 ${
+                          simulatedAlert && simulatedAlert.coop_id === coop.id
+                            ? simulatedAlert.level === 'danger'
+                              ? 'border-red-500/40 bg-red-950/10'
+                              : 'border-amber-500/40 bg-amber-950/10'
+                            : 'border-white/5'
+                        }`}>
                           <div className="flex justify-between items-center">
-                            <h3 className="text-sm font-bold text-white">{coop.name}</h3>
+                            <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                              {coop.name}
+                              {simulatedAlert && simulatedAlert.coop_id === coop.id && (
+                                <span className={`text-[9px] font-mono px-1 py-0.5 rounded ${
+                                  simulatedAlert.level === 'danger'
+                                    ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                                    : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                }`}>
+                                  {simulatedAlert.level === 'danger' ? 'HEAT' : 'NH3'}
+                                </span>
+                              )}
+                            </h3>
                             <span className="text-[10px] bg-slate-800 px-2 py-0.5 rounded font-mono text-slate-400">
                               ID: {coop.id}
                             </span>
@@ -704,7 +776,18 @@ export default function App() {
 
                 {/* Expanded Telemetry Analytics */}
                 <div className="glass-panel p-6 rounded-xl">
-                  <h2 className="text-base font-bold text-white mb-6">Historical Telemetry Aggregates (24 Hours)</h2>
+                  <h2 className="text-base font-bold text-white mb-6">
+                      Historical Telemetry Aggregates (24 Hours) — {selectedCoopMeta.name}
+                      {hasActiveAlert && (
+                        <span className={`ml-2 text-[10px] font-mono px-1.5 py-0.5 rounded align-middle ${
+                          simulatedAlert.level === 'danger'
+                            ? 'bg-red-500/20 text-red-400 border border-red-500/30 animate-pulse'
+                            : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                        }`}>
+                          ⚠ ACTIVE — {simulatedAlert.title.split(':')[0]}
+                        </span>
+                      )}
+                    </h2>
                   <div className="h-80">
                     <ResponsiveContainer width="100%" height="100%">
                       <LineChart data={selectedCoopHistory}>
@@ -797,27 +880,58 @@ export default function App() {
                     <p className="text-xs text-slate-400 mt-0.5">Spatial tracking and huddling index estimation.</p>
                   </div>
 
-                  {/* Camera Visualizer (Mock Graphic) */}
-                  <div className="relative aspect-video bg-[#121624] rounded-xl border border-white/5 overflow-hidden flex items-center justify-center">
-                    <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] from-teal-500/5 via-transparent to-transparent" />
-                    
-                    {/* Simulated Bounding Boxes */}
-                    <div className="absolute top-1/4 left-1/3 w-16 h-12 border-2 border-teal-500 rounded bg-teal-500/5 flex items-start p-0.5">
-                      <span className="text-[6px] font-mono text-teal-400 bg-slate-900/80 px-0.5 rounded">layer_hen 92%</span>
-                    </div>
-                    <div className="absolute top-1/2 left-1/2 w-14 h-14 border-2 border-teal-500 rounded bg-teal-500/5 flex items-start p-0.5">
-                      <span className="text-[6px] font-mono text-teal-400 bg-slate-900/80 px-0.5 rounded">layer_hen 89%</span>
-                    </div>
-                    <div className="absolute top-1/3 left-2/3 w-18 h-12 border-2 border-teal-500 rounded bg-teal-500/5 flex items-start p-0.5">
-                      <span className="text-[6px] font-mono text-teal-400 bg-slate-900/80 px-0.5 rounded">layer_hen 94%</span>
-                    </div>
+                  {/* Coop-specific Camera Visualizer */}
+                  <div className="relative aspect-video bg-[#121624] rounded-xl border border-white/5 overflow-hidden">
+                    {/* Gradient background tinted by stress level */}
+                    <div className={`absolute inset-0 bg-[radial-gradient(ellipse_at_center,_var(--tw-gradient-stops))] transition-all duration-700 ${
+                      selectedCoopStress.acoustic_stress > 0.6
+                        ? 'from-red-500/15 via-red-950/10 to-transparent'
+                        : 'from-teal-500/5 via-transparent to-transparent'
+                    }`} />
+
+                    {/* Simulated Bounding Boxes — unique per coop */}
+                    {getCoopCameraVisuals(selectedCoop).map((box, i) => (
+                      <div
+                        key={i}
+                        className="absolute border-2 rounded bg-opacity-5 flex items-start p-0.5 transition-all duration-500"
+                        style={{
+                          top: box.top,
+                          left: box.left,
+                          width: box.w,
+                          height: box.h,
+                          borderColor: selectedCoopStress.acoustic_stress > 0.6 ? 'rgba(239,68,68,0.6)' : 'rgba(45,212,191,0.6)',
+                          backgroundColor: selectedCoopStress.acoustic_stress > 0.6 ? 'rgba(239,68,68,0.05)' : 'rgba(45,212,191,0.05)',
+                        }}
+                      >
+                        <span className="text-[6px] font-mono text-teal-400 bg-slate-900/80 px-0.5 rounded">layer_hen {(85 + i * 3) % 100}%</span>
+                      </div>
+                    ))}
 
                     {/* Camera Feed HUD */}
                     <div className="absolute top-2 left-2 flex items-center gap-1.5 bg-slate-950/80 px-2 py-0.5 rounded text-[8px] font-mono text-slate-300">
-                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> LIVE FEED
+                      <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" /> {selectedCoopMeta.name.toUpperCase().replace(' ', '_')}_CAM
+                    </div>
+                    <div className="absolute top-2 right-2 bg-slate-950/80 px-2 py-0.5 rounded text-[8px] font-mono text-slate-400">
+                      {selectedCoopMeta.type === 'cage' ? 'CAGE' : 'DEEP_LITTER'} · {selectedCoopMeta.capacity} CAP
                     </div>
 
-                    <Camera className="w-10 h-10 text-slate-600" />
+                    {/* Sensor Overlay */}
+                    <div className="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-slate-950/90 via-slate-950/60 to-transparent px-3 py-2">
+                      <div className="flex gap-3 text-[9px] font-mono">
+                        <span className={selectedCoopLive.temperature > 32 ? 'text-red-400' : selectedCoopLive.temperature > 28 ? 'text-amber-400' : 'text-teal-400'}>
+                          🌡 {selectedCoopLive.temperature}°C
+                        </span>
+                        <span className="text-cyan-400">💧 {selectedCoopLive.humidity}%</span>
+                        <span className={selectedCoopStress.acoustic_stress > 0.6 ? 'text-red-400' : 'text-slate-300'}>
+                          🔊 {Math.round(selectedCoopStress.acoustic_stress * 100)}% stress
+                        </span>
+                        <span className="text-slate-400">
+                          🐔 {selectedCoopStress.active_birds}/{selectedCoopStress.bird_count}
+                        </span>
+                      </div>
+                    </div>
+
+                    <Camera className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-10 h-10 text-slate-700/50" />
                   </div>
 
                   <div className="bg-[#121624] p-4 rounded-xl border border-white/5 space-y-2">
