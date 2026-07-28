@@ -37,6 +37,18 @@ const COOPS = [
   { id: 8, name: 'Litter Coop 6',   type: 'deep_litter', capacity: 104 },
 ];
 
+// Camera feed config per coop
+const CAMERA_FEEDS = [
+  { coop_id: 1, rtsp: 'rtsp://192.168.1.101:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+  { coop_id: 2, rtsp: 'rtsp://192.168.1.102:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+  { coop_id: 3, rtsp: 'rtsp://192.168.1.103:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+  { coop_id: 4, rtsp: 'rtsp://192.168.1.104:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+  { coop_id: 5, rtsp: 'rtsp://192.168.1.105:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+  { coop_id: 6, rtsp: 'rtsp://192.168.1.106:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+  { coop_id: 7, rtsp: 'rtsp://192.168.1.107:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+  { coop_id: 8, rtsp: 'rtsp://192.168.1.108:554/stream1', protocol: 'poe', status: 'online',  resolution: '2688×1520' },
+];
+
 // Fixed seed for deterministic-but-varying output
 let tick = 0;
 
@@ -370,6 +382,70 @@ app.get('/api/financials', async (req, res) => {
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch financial metrics' });
+  }
+});
+
+// GET /api/cameras — per-coop camera feed config
+app.get('/api/cameras', async (req, res) => {
+  try {
+    if (MODE === 'sim') {
+      // Attach per-coop sim data to each camera feed
+      const feeds = CAMERA_FEEDS.map(f => {
+        const coop = COOPS.find(c => c.id === f.coop_id);
+        const stats = coop ? getCurrentStats(coop) : {};
+        return { ...f, current_temp: stats.temperature, current_stress: stats.acoustic_stress };
+      });
+      return res.json(feeds);
+    }
+    const result = await pool.query('SELECT * FROM cameras ORDER BY coop_id;');
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch camera feeds' });
+  }
+});
+
+// GET /api/alerts — active/recent alerts
+app.get('/api/alerts', async (req, res) => {
+  try {
+    if (MODE === 'sim') {
+      const alerts = [];
+      COOPS.forEach(c => {
+        const s = getCurrentStats(c);
+        if (s.temperature > 32) {
+          alerts.push({
+            id: Date.now() + c.id,
+            type: 'heat_stress',
+            severity: 'critical',
+            coop_id: c.id,
+            coop_name: c.name,
+            target_tab: 'overview',
+            message: `Temperature ${s.temperature}°C — acoustic stress ${s.acoustic_stress.toFixed(2)}. Automating misting systems.`,
+            timestamp: new Date().toISOString(),
+            mitigated: true,
+          });
+        }
+        if (s.nh3_level > 20) {
+          alerts.push({
+            id: Date.now() + c.id + 100,
+            type: 'ammonia',
+            severity: 'warning',
+            coop_id: c.id,
+            coop_name: c.name,
+            target_tab: 'telemetry',
+            message: `NH3 level at ${s.nh3_level} ppm — activate auxiliary ventilation.`,
+            timestamp: new Date().toISOString(),
+            mitigated: true,
+          });
+        }
+      });
+      return res.json(alerts);
+    }
+    const result = await pool.query("SELECT * FROM alerts WHERE resolved=false ORDER BY timestamp DESC LIMIT 10;");
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch alerts' });
   }
 });
 
