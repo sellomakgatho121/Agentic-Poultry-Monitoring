@@ -40,8 +40,8 @@ const COOPS = [
 // Fixed seed for deterministic-but-varying output
 let tick = 0;
 
-function randomBetween(min, max) {
-  const seeded = Math.sin((tick + 1) * 12.9898 + COOPS.length * 4.1415) * 43758.5453;
+function randomBetween(min, max, coopId) {
+  const seeded = Math.sin((tick + 1) * 12.9898 + (coopId || 1) * 4.1415) * 43758.5453;
   const r = seeded - Math.floor(seeded);
   return min + r * (max - min);
 }
@@ -54,16 +54,16 @@ function getCurrentStats(coop) {
   const isCage = coop.type === 'cage';
   const baseTemp = isCage ? 24.5 : 22.0;
   const baseHum  = isCage ? 55 : 60;
-  const wave = Math.sin(tick / 6) * 1.5;
+  const wave = Math.sin(tick / 6 + coop.id * 0.5) * 1.5;
   return {
-    temperature: parseFloat((baseTemp + wave + randomBetween(-0.3, 0.3)).toFixed(1)),
-    humidity:    parseFloat((baseHum - wave * 1.5 + randomBetween(-1, 1)).toFixed(1)),
-    nh3_level:   isCage ? 0.0 : parseFloat((12.0 + randomBetween(-1, 1) + Math.max(0, wave * 0.5)).toFixed(1)),
-    acoustic_stress:   parseFloat((0.20 + randomBetween(-0.08, 0.10)).toFixed(2)),
-    peak_frequency:    parseFloat((900 + randomBetween(-100, 100)).toFixed(1)),
-    huddling_index:    parseFloat((0.25 + randomBetween(-0.08, 0.10)).toFixed(2)),
+    temperature: parseFloat((baseTemp + wave + randomBetween(-0.3, 0.3, coop.id)).toFixed(1)),
+    humidity:    parseFloat((baseHum - wave * 1.5 + randomBetween(-1, 1, coop.id)).toFixed(1)),
+    nh3_level:   isCage ? 0.0 : parseFloat((12.0 + randomBetween(-1, 1, coop.id) + Math.max(0, wave * 0.5)).toFixed(1)),
+    acoustic_stress:   parseFloat((0.20 + randomBetween(-0.08, 0.10, coop.id)).toFixed(2)),
+    peak_frequency:    parseFloat((900 + randomBetween(-100, 100, coop.id)).toFixed(1)),
+    huddling_index:    parseFloat((0.25 + randomBetween(-0.08, 0.10, coop.id)).toFixed(2)),
     bird_count:        isCage ? 312 : 104,
-    active_birds:      isCage ? Math.floor(260 + randomBetween(-15, 10)) : Math.floor(88 + randomBetween(-8, 6)),
+    active_birds:      isCage ? Math.floor(260 + randomBetween(-15, 10, coop.id)) : Math.floor(88 + randomBetween(-8, 6, coop.id)),
   };
 }
 
@@ -71,19 +71,19 @@ function buildTelemetryHistory(rangeHours = 24, coopId = null) {
   const rows = [];
   const coops = coopId ? COOPS.filter(c => c.id === Number(coopId)) : COOPS;
   for (let h = rangeHours; h >= 0; h--) {
-    const fakeTick = tick - h;
     const time = new Date(Date.now() - h * 3600000).toISOString();
     coops.forEach(coop => {
       const isLitter = coop.type === 'deep_litter';
-      const wave = Math.sin((tick - h) / 6) * 1.5;
+      const coopOffset = coop.id * 0.7;
+      const wave = Math.sin((tick - h) / 6 + coop.id * 0.3) * 1.5;
       const baseTemp = isLitter ? 22.0 : 24.5;
       const baseHum  = isLitter ? 60 : 55;
       rows.push({
         time,
         coop_id: coop.id,
-        avg_temp:     parseFloat((baseTemp + wave + Math.sin(h * 0.5) * 0.5).toFixed(1)),
-        avg_humidity: parseFloat((baseHum - wave * 1.5 + Math.cos(h * 0.3) * 1.5).toFixed(1)),
-        avg_nh3:      isLitter ? parseFloat((12.0 + Math.sin(h * 0.7) * 2).toFixed(1)) : 0.0,
+        avg_temp:     parseFloat((baseTemp + wave + Math.sin(h * 0.5 + coopOffset) * 0.5).toFixed(1)),
+        avg_humidity: parseFloat((baseHum - wave * 1.5 + Math.cos(h * 0.3 + coopOffset) * 1.5).toFixed(1)),
+        avg_nh3:      isLitter ? parseFloat((12.0 + Math.sin(h * 0.7 + coopOffset) * 2).toFixed(1)) : 0.0,
       });
     });
   }
@@ -239,12 +239,13 @@ app.get('/api/stress/history', async (req, res) => {
       const coops = coop_id ? COOPS.filter(c => c.id === Number(coop_id)) : COOPS;
       for (let h = hours; h >= 0; h -= 2) {
         coops.forEach(c => {
+          const coopOffset = c.id * 0.7;
           rows.push({
             time: new Date(Date.now() - h * 3600000).toISOString(),
             coop_id: c.id,
-            acoustic_stress: parseFloat((0.20 + Math.sin(h * 0.1) * 0.08 + Math.sin(h * 0.03) * 0.04).toFixed(2)),
-            total_vocalizations: Math.floor(30 + Math.sin(h * 0.15) * 15),
-            huddling_index: parseFloat((0.25 + Math.sin(h * 0.08) * 0.08).toFixed(2)),
+            acoustic_stress: parseFloat((0.20 + Math.sin(h * 0.1 + coopOffset) * 0.08 + Math.sin(h * 0.03) * 0.04).toFixed(2)),
+            total_vocalizations: Math.floor(30 + Math.sin(h * 0.15 + coopOffset) * 15),
+            huddling_index: parseFloat((0.25 + Math.sin(h * 0.08 + coopOffset) * 0.08).toFixed(2)),
           });
         });
       }
@@ -277,8 +278,9 @@ app.get('/api/yield', async (req, res) => {
       for (let d = 30; d >= 0; d--) {
         const day = new Date(Date.now() - d * 86400000).toISOString().split('T')[0];
         COOPS.forEach(c => {
+          const coopOffset = c.id * 0.3;
           const baseQty = c.type === 'cage' ? 270 : 90;
-          const qty = Math.max(0, Math.floor(baseQty + Math.sin(d * 0.4) * 15 + Math.sin(d * 0.1) * 8));
+          const qty = Math.max(0, Math.floor(baseQty + Math.sin(d * 0.4 + coopOffset) * 15 + Math.sin(d * 0.1) * 8));
           history.push({ time: day, coop_id: c.id, quantity: qty, cracked: Math.floor(qty * 0.01), dirty: Math.floor(qty * 0.015) });
         });
       }
