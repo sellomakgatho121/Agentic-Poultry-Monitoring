@@ -14,7 +14,7 @@
  *                TWILIO_WHATSAPP_NUMBER, FARMER_WHATSAPP
  */
 
-const messsagingClient = () => {
+const messagingClient = () => {
   const sid = process.env.TWILIO_ACCOUNT_SID;
   const token = process.env.TWILIO_AUTH_TOKEN;
   if (!sid || !token) return null;
@@ -26,7 +26,7 @@ const messsagingClient = () => {
   }
 };
 
-const client = messsagingClient();
+const client = messagingClient();
 
 // ─── Format Helpers ─────────────────────────────────────────────────────────
 
