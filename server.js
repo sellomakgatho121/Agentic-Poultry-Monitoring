@@ -454,6 +454,41 @@ app.get('/api/health', (req, res) => {
   res.json({ status: 'ok', mode: MODE, uptime: process.uptime(), coops: COOPS.length });
 });
 
+// ─── WhatsApp / SMS Bot Integration ─────────────────────────────────────
+const whatsappWebhook = require('./routes/whatsapp');
+app.use('/api/webhook/whatsapp', whatsappWebhook);
+
+// Daily summary cron (7:00 AM JHB time)
+const cronActive = process.env.DAILY_SUMMARY_CRON !== 'disabled';
+if (cronActive) {
+  try {
+    const cron = require('node-cron');
+    const whatsapp = require('./services/whatsapp');
+    cron.schedule('0 7 * * *', async () => {
+      console.log('[Cron] Sending daily WhatsApp summary...');
+      try {
+        const baseUrl = `http://localhost:${PORT}`;
+        const [coops, liveTelemetry, liveStress, financials, alerts] = await Promise.all([
+          fetch(`${baseUrl}/api/coops`).then(r => r.json()),
+          fetch(`${baseUrl}/api/telemetry/live`).then(r => r.json()),
+          fetch(`${baseUrl}/api/stress/live`).then(r => r.json()),
+          fetch(`${baseUrl}/api/financials`).then(r => r.json()),
+          fetch(`${baseUrl}/api/alerts`).then(r => r.json()),
+        ]);
+        await whatsapp.sendDailySummary({ coops, liveTelemetry, liveStress, financials, alerts });
+        console.log('[Cron] Daily summary sent.');
+      } catch (err) {
+        console.error('[Cron] Failed to send daily summary:', err.message);
+      }
+    }, { timezone: 'Africa/Johannesburg' });
+    console.log('📱 WhatsApp bot scheduled (daily 07:00 SAST)');
+  } catch (err) {
+    console.log('📱 WhatsApp bot available (manual mode — install node-cron for scheduling)');
+  }
+} else {
+  console.log('📱 WhatsApp bot available (cron disabled)');
+}
+
 // 404 handler
 app.use((req, res) => {
   res.status(404).json({ error: 'Not found' });

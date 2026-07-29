@@ -403,7 +403,7 @@ export default function App() {
       {/* ============================================================================
           MAIN NAVIGATION & BENCHMARKS
           ============================================================================ */}
-      <div className="p-6 grid grid-cols-1 lg:grid-cols-4 gap-6 shrink-0">
+      <div className="p-3 md:p-6 grid grid-cols-1 lg:grid-cols-4 gap-3 md:gap-6 shrink-0">
         <div className="lg:col-span-3 flex gap-2 border-b border-white/5 pb-2 overflow-x-auto">
           {[
             { id: 'overview', label: 'Dashboard Overview', icon: Activity },
@@ -569,7 +569,7 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="h-64">
+                    <div className="h-48 md:h-64">
                       {selectedCoopHistory.length > 0 ? (
                         <ResponsiveContainer width="100%" height="100%">
                           <AreaChart data={selectedCoopHistory}>
@@ -861,7 +861,7 @@ export default function App() {
 
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Live Audio Spectrogram (Mock Graphic) */}
-                    <div className="bg-[#121624] p-4 rounded-xl border border-white/5 flex flex-col justify-between h-56">
+                    <div className="bg-[#121624] p-4 rounded-xl border border-white/5 flex flex-col justify-between h-40 md:h-56">
                       <span className="text-[10px] text-slate-400 uppercase font-mono">Live Audio Stream Spectrogram</span>
                       <div className="flex-1 flex items-end gap-1 justify-center py-4">
                         {[40, 60, 20, 80, 100, 30, 45, 90, 70, 55, 30, 80, 60, 40, 20, 95, 40, 60, 80].map((height, idx) => (
@@ -1141,7 +1141,7 @@ export default function App() {
                   {/* Production vs Baseline Chart */}
                   <div className="pt-4">
                     <h3 className="text-sm font-bold text-white mb-4">Daily Egg Yield (Last 7 Days)</h3>
-                    <div className="h-64">
+                    <div className="h-48 md:h-64">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={yieldHistory}>
                           <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.03)" />
